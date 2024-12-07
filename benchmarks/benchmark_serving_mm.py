@@ -1,5 +1,5 @@
 r"""Benchmark online serving throughput.
-
+vllm serve /WORK/PUBLIC/zhaijd_work/model/llava-1.5-7b-hf --dtype auto --chat-template template_llava.jinja
 On the server side, run one of the following commands:
     vLLM OpenAI API server
     vllm serve <your_model> \
@@ -128,7 +128,77 @@ def sample_sharegpt_requests(
 
     return filtered_dataset
 
+def sample_llava_requests(
+    dataset_path: str,
+    num_requests: int,
+    tokenizer: PreTrainedTokenizerBase,
+    fixed_output_len: Optional[int] = None,
+) -> List[Tuple[str, str, int, int]]:
+    import zipfile
+    import base64
+    if fixed_output_len is not None and fixed_output_len < 4:
+        raise ValueError("output_len too small")
+    
+    # 加载数据集
+    with open(os.path.join(dataset_path, 'chat.json')) as f:
+        dataset = json.load(f)
 
+    # 解压图像文件到内存或一个临时目录
+    # 已经提前解压
+    # with zipfile.ZipFile(os.path.join(dataset_path, 'images.zip'), 'r') as zip_ref:
+    #     zip_ref.extractall(os.path.join(dataset_path, 'images'))
+
+    # 过滤出至少有两轮对话的数据
+    dataset = [data for data in dataset if len(data["conversations"]) >= 2]
+    # 只保留对话的前两轮
+    dataset = [(data["conversations"][0]["value"],
+                data["conversations"][1]["value"],
+                data["image"]) for data in dataset]
+
+    # 打乱数据集
+    random.shuffle(dataset)
+
+    # 处理数据集并生成结果
+    filtered_dataset: List[Tuple[str, str, int, int]] = []
+    for i in range(len(dataset)):
+        if len(filtered_dataset) == num_requests:
+            break
+
+        prompt = dataset[i][0]
+        completion = dataset[i][1]
+        image_path = os.path.join(dataset_path, 'images', dataset[i][2])
+        
+        # 检查图像文件是否存在
+        if not os.path.exists(image_path):
+            continue
+
+        # 对 prompt 和 completion 进行分词和编码
+        prompt_token_ids = tokenizer(prompt).input_ids
+        completion_token_ids = tokenizer(completion).input_ids
+        prompt_len = len(prompt_token_ids)
+        output_len = len(completion_token_ids) if fixed_output_len is None else fixed_output_len
+        
+        if prompt_len < 4 or output_len < 4:
+            # 跳过太短的序列
+            continue
+        if prompt_len > 1024 or prompt_len + output_len > 2048:
+            # 跳过太长的序列
+            continue
+        
+        # 读取本地图片并进行编码
+        with open(image_path, "rb") as image_file:
+            encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+
+        mm_content = {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{encoded_image}"
+            },
+        }
+
+        filtered_dataset.append((prompt, prompt_len, output_len, mm_content))
+
+    return filtered_dataset
 def sample_sonnet_requests(
     dataset_path: str,
     num_requests: int,
@@ -863,7 +933,13 @@ def main(args: argparse.Namespace):
             range_ratio=args.random_range_ratio,
             tokenizer=tokenizer,
         )
-
+    elif args.dataset_name == "llava":
+        input_requests = sample_llava_requests(
+            dataset_path=args.dataset_path,
+            num_requests=args.num_prompts,
+            tokenizer=tokenizer,
+            fixed_output_len=args.sharegpt_output_len,
+        )
     else:
         raise ValueError(f"Unknown dataset: {args.dataset_name}")
 
@@ -944,7 +1020,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--backend",
         type=str,
-        default="vllm",
+        default="openai-chat",
         choices=list(ASYNC_REQUEST_FUNCS.keys()),
     )
     parser.add_argument(
@@ -953,12 +1029,13 @@ if __name__ == "__main__":
         default=None,
         help="Server or API base url if not using http host and port.",
     )
-    parser.add_argument("--host", type=str, default="11.11.4.1")
+    parser.add_argument("--host", type=str, default="localhost")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument(
         "--endpoint",
         type=str,
-        default="/v1/completions",
+        # default="/v1/completions",
+        default="/v1/chat/completions",
         help="API endpoint.",
     )
     parser.add_argument(
@@ -971,13 +1048,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset-name",
         type=str,
-        default="sharegpt",
-        choices=["sharegpt", "sonnet", "random", "hf"],
+        default="llava",
+        choices=["sharegpt", "sonnet", "random", "hf", "llava"],
         help="Name of the dataset to benchmark on.",
     )
     parser.add_argument("--dataset-path",
                         type=str,
-                        default="/WORK/PUBLIC/zhaijd_work/dataset/sharegpt_v3/ShareGPT_V3_unfiltered_cleaned_split.json",
+                        default="/WORK/PUBLIC/zhaijd_work/dataset/LLaVA-CC3M-Pretrain-595K",
                         help="Path to the sharegpt/sonnet dataset. "
                         "Or the huggingface dataset ID if using HF dataset.")
     parser.add_argument(
@@ -997,7 +1074,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         # required=True,
-        default="/WORK/PUBLIC/zhaijd_work/dataset/Llama-2-7b-hf",
+        default="/WORK/PUBLIC/zhaijd_work/model/llava-1.5-7b-hf",
         help="Name of the model.",
     )
     parser.add_argument(

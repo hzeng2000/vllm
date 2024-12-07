@@ -23,7 +23,8 @@ from vllm.utils import FlexibleArgumentParser
 
 # Modify OpenAI's API key and API base to use vLLM's API server.
 openai_api_key = "EMPTY"
-openai_api_base = "http://localhost:8000/v1"
+# openai_api_base = "http://localhost:8000/v1"
+openai_api_base = "http://11.11.5.1:8000/v1"
 
 client = OpenAI(
     # defaults to os.environ.get("OPENAI_API_KEY")
@@ -44,6 +45,14 @@ def encode_base64_content_from_url(content_url: str) -> str:
 
     return result
 
+def encode_base64_content_from_file(file_path: str) -> str:
+    """Encode a content retrieved from a local file to base64 format."""
+
+    with open(file_path, 'rb') as file:
+        file_content = file.read()
+        result = base64.b64encode(file_content).decode('utf-8')
+
+    return result
 
 # Text-only inference
 def run_text_only() -> None:
@@ -64,33 +73,34 @@ def run_text_only() -> None:
 def run_single_image() -> None:
 
     ## Use image url in the payload
-    image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
-    chat_completion_from_url = client.chat.completions.create(
-        messages=[{
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": "What's in this image?"
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": image_url
-                    },
-                },
-            ],
-        }],
-        model=model,
-        max_completion_tokens=64,
-    )
+    # image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+    # chat_completion_from_url = client.chat.completions.create(
+    #     messages=[{
+    #         "role":
+    #         "user",
+    #         "content": [
+    #             {
+    #                 "type": "text",
+    #                 "text": "What's in this image?"
+    #             },
+    #             {
+    #                 "type": "image_url",
+    #                 "image_url": {
+    #                     "url": image_url
+    #                 },
+    #             },
+    #         ],
+    #     }],
+    #     model=model,
+    #     max_completion_tokens=64,
+    # )
 
-    result = chat_completion_from_url.choices[0].message.content
-    print("Chat completion output from image url:", result)
+    # result = chat_completion_from_url.choices[0].message.content
+    # print("Chat completion output from image url:", result)
 
     ## Use base64 encoded image in the payload
-    image_base64 = encode_base64_content_from_url(image_url)
+    # image_base64 = encode_base64_content_from_url(image_url)
+    image_base64 = encode_base64_content_from_file("/home/fit/zhaijd/WORK/hzeng/vllm/examples/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg")
     chat_completion_from_base64 = client.chat.completions.create(
         messages=[{
             "role":
